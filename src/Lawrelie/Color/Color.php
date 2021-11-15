@@ -79,40 +79,6 @@ class Color {
     public function hsbPercentageToNumber(float $percentage): float {
         return $percentage / 100;
     }
-    public function hsbToRgb(float $hue, float $chroma, float $match): array {
-        $hue_ = $hue / 60;
-        $x = $chroma * (1 - ($hue_ % 2 - 1));
-        if (0 > $hue_ || 6 < $hue_) {
-            $r1 = 0;
-            $g1 = 0;
-            $b1 = 0;
-        } elseif (1 >= $hue_) {
-            $r1 = $chroma;
-            $g1 = $x;
-            $b1 = 0;
-        } elseif (2 >= $hue_) {
-            $r1 = $x;
-            $g1 = $chroma;
-            $b1 = 0;
-        } elseif (3 >= $hue_) {
-            $r1 = 0;
-            $g1 = $chroma;
-            $b1 = $x;
-        } elseif (4 >= $hue_) {
-            $r1 = 0;
-            $g1 = $x;
-            $b1 = $chroma;
-        } elseif (5 >= $hue_) {
-            $r1 = $x;
-            $g1 = 0;
-            $b1 = $chroma;
-        } else {
-            $r1 = $chroma;
-            $g1 = 0;
-            $b1 = $x;
-        }
-        return [$this->rgbSTo8bit($r1 + $match), $this->rgbSTo8bit($g1 + $match), $this->rgbSTo8bit($b1 + $match)];
-    }
     public function rgb8bitToS(float $rgb8): float {
         return $rgb8 / 255;
     }
@@ -134,49 +100,97 @@ class Color {
     protected function setFromHexTripet(string $r, string $g, string $b): void {
         $this->setFromRgb(\hexdec($r), \hexdec($g), \hexdec($b));
     }
-    protected function setFromHsl(int $h, int $sp, int $lp): void {
-        $ln = $this->hsbPercentageToNumber($lp);
-        $sn = $this->hsbPercentageToNumber($sp);
-        $chroma = (1 - (2 * $ln)) * $sn;
-        $rgb = $this->hsbToRgb($h, $chroma, $ln - $chroma / 2);
-        $value = $ln + $sn * \min($ln, 1 - $ln);
+    protected function setFromHsl(int $hue, int $saturation, int $lightness): void {
+        $h = $hue;
+        $sl = $saturation / 100;
+        $l = $lightness / 100;
+        // $c = (1 - (2 * $l - 1)) * $sl;
+        $h_ = $h / 60;
+        // $x = $c * (1 - (fmod($h_, 2) - 1));
+        // [$r1, $g1, $b1] = match (true) {
+        //     0 > $h_, 6 <= $h_ => [0, 0, 0],
+        //     1 > $h_ => [$c, $x, 0],
+        //     2 > $h_ => [$x, $c, 0],
+        //     3 > $h_ => [0, $c, $x],
+        //     4 > $h_ => [0, $x, $c],
+        //     5 > $h_ => [$x, 0, $c],
+        //     default => [$c, 0, $x],
+        // };
+        // $m = $l - $c / 2;
+        // $rgb = array_map(function(float $rgb) use($m): float {return ($rgb + $m) * 255;}, [$r1, $g1, $b1]);
+        $hv = $hl = $hue;
+        $v = $l + $sl * min($l, 1 - $l);
+        $sv = 0 == $v ? 0 : 2 * (1 - $l / $v);
+
+        // From: from RGB
+        $c = 0 === $h ? 0 : 2 * ($v - $l);
+        $xmin = $v - $c;
+        $xmax = $v;
+        if (0 == $h_ || 0 == $c) {
+            $r = $g = $b = $xmax;
+        } else if (1 >= $h_) {
+            $r = $v;
+            $gminusb = ($h_ - 0) * $c;
+            if (0 > $gminusb) {
+                $g = $xmin;
+                $b = $g - $gminusb;
+            } else {
+                $b = $xmin;
+                $g = $gminusb + $b;
+            }
+        } else if (3 >= $h_) {
+            $g = $v;
+            $bminusr = ($h_ - 2) * $c;
+            if (0 > $bminusr) {
+                $b = $xmin;
+                $r = $b - $bminusr;
+            } else {
+                $r = $xmin;
+                $b = $bminusr + $r;
+            }
+        } else if (5 >= $h_) {
+            $b = $v;
+            $rminusg = ($h_ - 4) * $c;
+            if (0 > $rminusg) {
+                $r = $xmin;
+                $g = $r - $rminusg;
+            } else {
+                $g = $xmin;
+                $r = $rminusg + $g;
+            }
+        }
+        $rgb = array_map(fn(float $rgb): float => $rgb * 255, [$r, $g, $b]);
+
         $this->color = [
             'hexTripet' => $this->rgbToHexTripet(...$rgb),
-            'hsl' => [$h, $sp, $lp],
-            'hsv' => [$h, $this->hsbNumberToPercentage(!$value ? 0 : 2 * (1 - $ln / $value)), $this->hsbNumberToPercentage($value)],
+            'hsl' => [$hue, $saturation, $lightness],
+            'hsv' => [$hue, $sv * 100, $v * 100],
             'rgb' => $rgb,
        ];
     }
-    protected function setFromHsv(int $h, int $sp, int $vp): void {
-        $sn = $this->hsbPercentageToNumber($sp);
-        $vn = $this->hsbPercentageToNumber($vp);
-        $chroma = $vn * $sn;
-        $lightness = $vn * (1 - $sn / 2);
-        $rgb = $this->hsbToRgb($h, $chroma, $vn - $chroma);
-        $this->color = [
-            'hexTripet' => $this->rgbToHexTripet(...$rgb),
-            'hsl' => [$h, $this->hsbNumberToPercentage(!$lightness || 1 === $lightness ? 0 : ($vn - $lightness) / \min($lightness, 1 - $lightness)), $this->hsbNumberToPercentage($lightness)],
-            'hsv' => [$h, $sp, $vp],
-            'rgb' => $rgb,
-       ];
+    protected function setFromHsv(int $h, int $s, int $v): void {
+        $v_ = $v / 100;
+        $lightness = $v_ * (1 - $s / 100 / 2);
+        $this->setFromHsl($h, (!$lightness || 1 === $lightness ? 0 : ($v_ - $lightness) / \min($lightness, 1 - $lightness)) * 100, $lightness * 100);
     }
-    protected function setFromRgb(int $r8, int $g8, int $b8): void {
-        $rs = $this->rgb8bitToS($r8);
-        $gs = $this->rgb8bitToS($g8);
-        $bs = $this->rgb8bitToS($b8);
-        $rgbsMax = $value = \max($rs, $gs, $bs);
-        $rgbsMin = \min($rs, $gs, $bs);
-        $rgbsMid = $lightness = ($rgbsMax + $rgbsMin) / 2;
-        $chroma = $rgbsMax - $rgbsMin;
-        $hue = !$chroma ? 0 : 60 * ($rs === $value ? 0 + ($gs - $bs) / $chroma : ($gs === $value ? 2 + ($bs - $rs) / $chroma : 4 + ($rs - $gs) / $chroma));
-        $hue += 0 > $hue ? 360: 0;
-        $lightnessSaturation = !$lightness || 1.0 === $lightness ? 0 : ($value - $lightness) / \min($lightness, 1 - $lightness);
-        $valueSaturation = !$value ? 0 : $chroma / $value;
+    protected function setFromRgb(int $red, int $green, int $blue): void {
+        $r = $red / 255;
+        $g = $green / 255;
+        $b = $blue / 255;
+        $xmax = $v = max($r, $g, $b);
+        $xmin = min($r, $g, $b);
+        $c = $xmax - $xmin;
+        $l = $v - $c / 2;
+        $h = 0 == $c ? 0 : 60 * match (true) {
+            $r === $v => 0 + ($g - $b) / $c,
+            $g === $v => 2 + ($b - $r) / $c,
+            $b === $v => 4 + ($r - $g) / $c,
+        };
         $this->color = [
-            'hexTripet' => $this->rgbToHexTripet($r8, $g8, $b8),
-            'hsl' => [$hue, $this->hsbNumberToPercentage($lightnessSaturation), $this->hsbNumberToPercentage($lightness)],
-            'hsv' => [$hue, $this->hsbNumberToPercentage($valueSaturation), $this->hsbNumberToPercentage($value)],
-            'rgb' => [$r8, $g8, $b8],
+            'hexTripet' => $this->rgbToHexTripet($red, $green, $blue),
+            'hsl' => [$h, (0 == $l || 1 == $l ? 0 : ($v - $l) / min($l, 1 - $l)) * 100, $l * 100],
+            'hsv' => [$h, (0 == $v ? 0 : $c / $v) * 100, $v * 100],
+            'rgb' => [$red, $green, $blue],
        ];
     }
 }
